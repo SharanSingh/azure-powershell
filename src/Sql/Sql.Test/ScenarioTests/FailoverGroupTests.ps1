@@ -12,7 +12,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------------
 
-function Handle-FailoverGroupTest($scriptBlock, $primaryLocation = "North Europe", $secondaryLocation = "West Europe", $serverVersion = "12.0", $rg = $null, $server1 = $null, $server2 = $null, $cleanup = $false)
+function Handle-FailoverGroupTest($scriptBlock, $primaryLocation = "North Europe", $secondaryLocation = "West Europe", $serverVersion = "12.0", $rg = $null, $server1 = $null, $server2 = $null, $cleanup = $false, $partnerSubId = $null)
 {
 	try
 	{
@@ -20,7 +20,25 @@ function Handle-FailoverGroupTest($scriptBlock, $primaryLocation = "North Europe
 
 		$rg = if ($rg -eq $null) { Create-ResourceGroupForTest } else { $rg }
 		$server1 = if ($server1 -eq $null) { Create-ServerForTest $rg $primaryLocation } else { $server1 }
-		$server2 = if ($server2 -eq $null) { Create-ServerForTest $rg $secondaryLocation } else { $server2 }
+
+		if ($partnerSubId -eq $null)
+		{
+			$server2 = if ($server2 -eq $null) { Create-ServerForTest $rg $secondaryLocation } else { $server2 }
+		}
+		else
+		{
+			# Save the source server context
+			$currentContext = Get-AzContext
+
+			#Set context to partner subscription
+			Set-AzContext -Subscription $partnerSubId
+
+			#Create server in partner subscription
+			$server2 = if ($server2 -eq $null) { Create-ServerForTest $rg $secondaryLocation } else { $server2 }
+
+			#Revert context back to source server
+			Set-AzContext -Context $currentContext
+		}
 
 		Invoke-Command -ScriptBlock $scriptBlock -ArgumentList $server1,$server2
 	}
@@ -239,6 +257,8 @@ function Test-CreateFailoverGroup-Overflow()
 
 function Test-CreateFailoverGroup-CrossSubscription()
 {
+	# For now, partnerSubId is same as source subscription Id.
+	# Yet, we pass in an explicit value to make sure it is parsed correctly and accepted.
 	Handle-FailoverGroupTest {
 		Param($server, $partnerServer)
 
@@ -247,7 +267,7 @@ function Test-CreateFailoverGroup-CrossSubscription()
 		$fg = $server | New-AzSqlDatabaseFailoverGroup -FailoverGroupName $fgName -PartnerSubscriptionId $partnerSubscriptionId -PartnerResourceGroupName $partnerServer.ResourceGroupName -PartnerServerName $partnerServer.ServerName -FailoverPolicy Manual
 		Validate-FailoverGroup $server $partnerServer $fgName Primary Manual $null Disabled @() $fg
 		Validate-FailoverGroupWithGet $fg
-	}
+	} -partnerSubId (Get-AzContext).Subscription.Id
 }
 
 function Test-SetFailoverGroup-Named()
